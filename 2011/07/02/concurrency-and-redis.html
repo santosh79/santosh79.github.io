@@ -1,0 +1,169 @@
+<!doctype html>
+<html>
+  <head>
+    <link rel="stylesheet" type="text/css" href="/css/main.css">
+    <link rel="alternate" type="application/atom+xml" title="Concurrency and Redis - feed" href="/index.xml" />
+
+    <script type="text/javascript">
+      if((navigator.userAgent.match(/iPad/i))) {
+        document.write("<meta name=\"viewport\" content=\"width=device-width; initial-scale=1.0; maximum-scale=1.0; user-scalable=0;\" />");
+      } else if((navigator.userAgent.match(/iPhone/i))) {
+        document.write("<meta name=\"viewport\" content=\"width=device-width; initial-scale=0.5; maximum-scale=1.0; user-scalable=1;\" />");
+      }
+    </script>
+
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/> 
+    <title>Concurrency and Redis</title>
+  </head>
+  <body>
+    <header id="main_header">
+      <span>
+        <a href="/">blog</a>
+      </span>
+      <span>
+        <a href="http://santosh79.tumblr.com" target="_blank">tumblog</a>
+      </span>
+      <span>
+        <a href="http://github.com/santosh79/" target="_blank">github</a>
+      </span>
+      <span>
+        <a href="http://twitter.com/santosh79" target="_blank">@santosh79</a>
+      </span>
+      <span>
+        <a href="/images/resume.html">resume</a>
+      </span>
+    </header>
+    <section>
+      <article class="post">
+  <header>
+    <div class="date_article_page">July 2nd 2011</div>
+    <h1>Concurrency and Redis</h1>
+  </header>
+
+  <section class="content">
+    <p>Redis is an amazing global datastructure server. The fact that it&rsquo;s global, makes it ideal for a multi-process or multi-threaded system, to get some concurrency action going. This also means, that a lot of the cautions that need to be taken while working in a shared memory system also apply to a situation where redis is operating in a concurrent/distributed environment. In this article, I am going to glaze over a couple of gotcha&rsquo;s to watch out for when working with Redis. It is by no means an attempt to be an exhaustive monograph on concurrency and Redis, but rather something to get your feet wet.</p>
+
+<h3>Having the rug pulled from under you</h3>
+
+<p>Check out the following code:</p>
+
+<pre><code>if redis.exists("some_key")
+  puts "Yay! Redis' got it"
+  compute_primes   #Perform some time-intensive computation
+  val = redis.get("some_key")
+  render :json =&gt; { :value =&gt; val }
+end
+</code></pre>
+
+<p>This code that checks for the existence of a key in redis in line 1 and then performs some conditional logic, part of which involves retrieving the key from redis has a race condition in it. It is the fact that in between lines 1 and 4 another process could&rsquo;ve deleted the key from redis. A quick fix for this:</p>
+
+<pre><code>if val = redis.get("some_key")
+  #rest of the code here ...
+end
+</code></pre>
+
+<h3>Modifying keys safely</h3>
+
+<p>Again an example is far more illustrative:</p>
+
+<pre><code>def update_safe_ips
+  redis.del("safe_ips")
+  safe_ip_ids = SafeIps.select(id).all.map(&amp;:id)
+  safe_ip_ids.each { |safe_ip_id| redis.lpush("safe_ips", safe_ip_id) }
+end
+</code></pre>
+
+<p>What this method is supposed to do is update the safe_ips redis list with stuff from the SafeIps table in the DB.  The problem with this code is that it&rsquo;s too eager to delete the &ldquo;safe_ips&rdquo; list. After line 1 executes the safe_ips list is nixed from redis. Assuming a different process runs after line 1 executes, and that process depends upon this safe_ips list existing, it&rsquo;s going to blow. So what&rsquo;s the solution? For any kind of operations that involve updating a redis datastructure, avoid deleting it. Instead lean towards creating a &ldquo;temp&rdquo; version of the datastructure and using the rename command, which is atomic. A second pass at fixing the code looks something like this:</p>
+
+<pre><code>def update_safe_ips
+  safe_ip_ids = SafeIps.select(id).all.map(&amp;:id)
+  safe_ip_ids.each { |safe_ip_id| redis.lpush("safe_ips_temp", safe_ip_id) }
+  redis.rename "safe_ips_temp", "safe_ips"
+end
+</code></pre>
+
+<p>While this code looks like it should work great it still has a race condition in it. If two processes were to concurrently hit this method, they both would each populate this &ldquo;safe_ids_temp&rdquo; list thereby creating dups. In essence, if:</p>
+
+<pre><code>SafeIps.select(id).all.map(&amp;:id) # =&gt; ["10.0.0.1", "10.0.0.2", "10.0.0.3"]
+</code></pre>
+
+<p>Then if two processes were to execute this update_safe_ips method at the same time, the &ldquo;safe_id_temp&rdquo; list could be [&ldquo;10.0.0.1&rdquo;, &ldquo;10.0.0.2&rdquo;, &ldquo;10.0.0.3&rdquo;,&ldquo;10.0.0.1&rdquo;, &ldquo;10.0.0.2&rdquo;, &ldquo;10.0.0.3&rdquo;]. To protect against this:</p>
+
+<pre><code>def update_safe_ips
+  safe_ip_ids = SafeIps.select(id).all.map(&amp;:id)
+  temp_list   = %Q{ safe_id_temp#{UUID.getUUID} }
+  safe_ip_ids.each { |safe_ip_id| redis.lpush(temp_list, safe_ip_id) }
+  redis.rename temp_list, "safe_ips"
+end
+</code></pre>
+
+<p>This code assumes the existence of a UUID library, which returns a unique ID on every call. Now, if more than one process were to run, they would each create their own temp_list&rsquo;s. This way, dups will not be created.</p>
+
+<h3>Running a piece of code only once</h3>
+
+<p>Often times, we would like for a certain piece of code to run successfully exactly once. A classic example of this is something like setting up some auth tokens:</p>
+
+<pre><code>def setup_auth_tokens
+  username   = redis.hget "web_service_creds", "username"
+  pwd        = redis.hget "web_service_creds", "pwd"
+  auth_token = get_auth_token username, pwd
+  redis.set "web_service_auth_token", auth_token
+end
+</code></pre>
+
+<p>Now, we know that this setup_auth_tokens method is going to be called multiple times in a concurrent environment. How do we ensure it executes successfully just once, in the lightest possible manner? A first stab could be:</p>
+
+<pre><code>def setup_auth_tokens
+  unless redis.setnx "setting_up_auth_token", true
+    username   = redis.hget "web_service_creds", "username"
+    pwd        = redis.hget "web_service_creds", "pwd"
+    auth_token = get_auth_token username, pwd
+    redis.set "web_service_auth_token", auth_token
+  end
+end
+</code></pre>
+
+<p>The setnx command would return true, only if the key does not already exist. This way we can force a certain block of code to be executed only once. While this would ensure that the block in the ensure happens only once, if for some reason an exception gets thrown in the block code no other attempts are made at re-setting the auth token. A quick fix:</p>
+
+<pre><code>def setup_auth_tokens
+  begin
+    unless redis.setnx "setting_up_auth_token", true
+      username   = redis.hget "web_service_creds", "username"
+      pwd        = redis.hget "web_service_creds", "pwd"
+      auth_token = get_auth_token username, pwd
+      redis.set "web_service_auth_token", auth_token
+    end
+  rescue
+    redis.del "setting_up_auth_token"
+  end
+end
+</code></pre>
+
+<h3>Conclusion</h3>
+
+<p>Redis is shared memory on steroids. Working with redis in a concurrent environment is both fun and highly performant. Enjoy!</p>
+
+  </section>
+
+  <section class="comments">
+
+    <div id="disqus_thread"></div>
+    <script type='text/javascript' src='http://santosh-log.disqus.com/embed.js'></script>
+    <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    <a href="http://disqus.com" class="dsq-brlink">blog comments powered by <span class="logo-disqus">Disqus</span></a>
+
+
+  </section>
+</article>
+
+ 
+    </section>
+  
+  
+  
+  
+  
+  
+  </body>
+</html>
+

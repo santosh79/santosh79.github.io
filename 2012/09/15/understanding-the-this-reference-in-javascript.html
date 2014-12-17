@@ -1,0 +1,198 @@
+<!doctype html>
+<html>
+  <head>
+    <link rel="stylesheet" type="text/css" href="/css/main.css">
+    <link rel="alternate" type="application/atom+xml" title="Understanding the this reference in Javascript - feed" href="/index.xml" />
+
+    <script type="text/javascript">
+      if((navigator.userAgent.match(/iPad/i))) {
+        document.write("<meta name=\"viewport\" content=\"width=device-width; initial-scale=1.0; maximum-scale=1.0; user-scalable=0;\" />");
+      } else if((navigator.userAgent.match(/iPhone/i))) {
+        document.write("<meta name=\"viewport\" content=\"width=device-width; initial-scale=0.5; maximum-scale=1.0; user-scalable=1;\" />");
+      }
+    </script>
+
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/> 
+    <title>Understanding the this reference in Javascript</title>
+  </head>
+  <body>
+    <header id="main_header">
+      <span>
+        <a href="/">blog</a>
+      </span>
+      <span>
+        <a href="http://santosh79.tumblr.com" target="_blank">tumblog</a>
+      </span>
+      <span>
+        <a href="http://github.com/santosh79/" target="_blank">github</a>
+      </span>
+      <span>
+        <a href="http://twitter.com/santosh79" target="_blank">@santosh79</a>
+      </span>
+      <span>
+        <a href="/images/resume.html">resume</a>
+      </span>
+    </header>
+    <section>
+      <article class="post">
+  <header>
+    <div class="date_article_page">September 15th 2012</div>
+    <h1>Understanding the this reference in Javascript</h1>
+  </header>
+
+  <section class="content">
+    <p>The <em>this</em> reference in Javascript is probably one of the most confusing scoping concepts for people coming new to the language. Understanding, the <em>this</em> reference lets you unlock the mysteries of Object Oriented Javascript and gain a better/more intuitive understanding of how the object model is structured.</p>
+
+<h3>Explicitly setting the this reference</h3>
+
+<p>Here&rsquo;s a little code to get us going</p>
+
+<pre><code>function setVar(arg) {
+  this.var = arg;
+}
+var obj = Object.create(null);
+obj.setVar = setVar;
+obj.setVar('hello');
+console.log(obj.var); // =&gt; 'hello'
+</code></pre>
+
+<p>What&rsquo;s going on here?</p>
+
+<pre><code>- We are declaring a function called "setVar" that sets the "var" property of whatever the "this" reference is pointing to, to the argument it receives
+- We then construct an object called "obj", assign it's "setVar" property to the setVar function
+- Finally we call the setVar function *via* the obj object
+</code></pre>
+
+<p>Executing this code, you&rsquo;ll see that the <em>obj</em> object does now have a <em>var</em> property set to &lsquo;hello&rsquo;. Even though, no where in our code we are doing:</p>
+
+<pre><code>obj.var = 'hello';
+</code></pre>
+
+<p>How is this? When you call <strong>object.method()</strong> the <em>this</em> reference is set to <em>object</em> within the confines of <em>method</em>. In the above case, since we called <em>obj.setVar</em> the <em>this</em> reference was set to point to <em>obj</em> within the confines of the setVar method. And since, setVar adds a property called var to whatever it&rsquo;s <em>this</em> is, obj was gifted with the <em>var</em> property.</p>
+
+<h3>Setting the this reference using &ldquo;call&rdquo; or &ldquo;apply&rdquo;</h3>
+
+<p>Javascript let&rsquo;s you specify what you would like the <em>this</em> reference to be when calling a function, by using either the <em>call()</em> or <em>apply()</em> functions. The format of <em>call()</em> is:</p>
+
+<pre><code>SomeFunction.call(the_this_object, *arguments)
+</code></pre>
+
+<p>Rewriting the previous example to use <em>call()</em></p>
+
+<pre><code>function setVar(arg) {
+  this.var = 'hello';
+}
+var obj = Object.create(null);
+setVar.call(obj, 'hello');
+console.log(obj.var); // =&gt; 'hello'
+</code></pre>
+
+<p>As you can see, this feels a little more flexible and is sometimes better than the <em>object.method()</em> approach. The <em>apply()</em> function is identical to <em>call()</em> with the only difference between that the last argument is an array instead of your arguments being laid out comma seperated. If we were to use apply() instead it would be:</p>
+
+<pre><code>setVar.apply(obj, ['hello']);
+</code></pre>
+
+<h3>Capturing the this reference</h3>
+
+<p>You might often see code that does:</p>
+
+<pre><code>var that = this;
+....
+Some code follows
+        ....
+</code></pre>
+
+<p>And you might wonder why are they doing this. Inside every function call, the <em>this</em> reference is reset. So for example:</p>
+
+<pre><code>function outer() {
+  this.foo = 'blah';
+  function inner() {
+    console.log(this.foo);
+  }
+  inner();
+}
+var obj = Object.create(null);
+outer.call(obj);
+</code></pre>
+
+<p>Running this, results in <em>undefined</em> being logged. Why is that? The <em>this</em> reference in outer is set to <em>obj</em> since we are explicitly doing this by the <em>call()</em> function. However, in <em>inner()</em> the <em>this</em> reference points to a different object, which is why logging the <em>foo</em> property of <em>this</em> in <em>inner()</em> resulted in undefined.</p>
+
+<p>How do we fix this? One way is to capture the <em>this</em> reference and use it.</p>
+
+<pre><code>function outer() {
+  var that = this;
+  that.foo = 'blah';
+  function inner() {
+    console.log(that.foo);
+  }
+  inner();
+}
+var obj = Object.create(null);
+outer.call(obj);
+</code></pre>
+
+<p>Another way, would&rsquo;ve been to call <em>inner()</em> using the <em>call()</em> function passing the <em>this</em> of outer to it. Personally, I think this is more readable.</p>
+
+<h3>Using the bind function</h3>
+
+<p>Javascript also let&rsquo;s you <em>bind</em> the this reference to a function, so all future invocations of that function will use the object you had initially bound the function to. This is useful when you don&rsquo;t want to keep remembering to use the <em>call()</em> function. An example of <em>bind()</em></p>
+
+<pre><code>function setFoo() {
+  this.foo = 'bar';
+}
+var obj = Object.create(null);
+var boundSetFoo = setFoo.bind(obj);
+boundSetFoo();
+console.log(obj.foo); // 'bar'
+</code></pre>
+
+<p>Here, we are creating a bounded reference to the <em>setFoo()</em> function called <em>boundSetFoo</em> with the object <em>obj</em> being the <em>this</em>. This way of capturing <em>this</em> is particularly helpful when working with events and event handlers.</p>
+
+<pre><code>function eventHandler(evt) {
+  if(!this.eventsReceived) {
+    this.eventsReceived = [];
+  }
+  this.eventsReceived.push(evt);
+  console.log('event is %s', evt);
+}
+var evtEmitter = Object.create(events.EventEmitter.prototype);
+
+var obj = Object.create(null);
+evtEmitter.on('some_event', eventHandler.bind(obj));
+
+var someOtherObj = Object.create(null);
+evtEmitter.on('some_event', eventHandler.bind(someOtherObj));
+
+obj.emit('some_event', 'hi there');
+</code></pre>
+
+<p>Here we have two objects <em>obj</em> and <em>someOtherObj</em> both of which have subscribed to the <em>some_event</em> event on the <em>evtEmitter</em> object. Notice, how we reuse the <em>eventHandler</em> function but tweak it to bind to the right object just when we need it to. Neat, heh?</p>
+
+<h3>TL;DR</h3>
+
+<p>Javascript is super malleable, letting you bend it to your will. This malleability lets you come up with incredibly elegant solutions for seemingly intractable problems. But this malleability means, it&rsquo;s pretty easy to write poor code too.</p>
+
+  </section>
+
+  <section class="comments">
+
+    <div id="disqus_thread"></div>
+    <script type='text/javascript' src='http://santosh-log.disqus.com/embed.js'></script>
+    <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    <a href="http://disqus.com" class="dsq-brlink">blog comments powered by <span class="logo-disqus">Disqus</span></a>
+
+
+  </section>
+</article>
+
+ 
+    </section>
+  
+  
+  
+  
+  
+  
+  </body>
+</html>
+

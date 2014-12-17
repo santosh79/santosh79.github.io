@@ -1,0 +1,176 @@
+<!doctype html>
+<html>
+  <head>
+    <link rel="stylesheet" type="text/css" href="/css/main.css">
+    <link rel="alternate" type="application/atom+xml" title="Using the watch command to maintain consistency of your Redis dataset - feed" href="/index.xml" />
+
+    <script type="text/javascript">
+      if((navigator.userAgent.match(/iPad/i))) {
+        document.write("<meta name=\"viewport\" content=\"width=device-width; initial-scale=1.0; maximum-scale=1.0; user-scalable=0;\" />");
+      } else if((navigator.userAgent.match(/iPhone/i))) {
+        document.write("<meta name=\"viewport\" content=\"width=device-width; initial-scale=0.5; maximum-scale=1.0; user-scalable=1;\" />");
+      }
+    </script>
+
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/> 
+    <title>Using the watch command to maintain consistency of your Redis dataset</title>
+  </head>
+  <body>
+    <header id="main_header">
+      <span>
+        <a href="/">blog</a>
+      </span>
+      <span>
+        <a href="http://santosh79.tumblr.com" target="_blank">tumblog</a>
+      </span>
+      <span>
+        <a href="http://github.com/santosh79/" target="_blank">github</a>
+      </span>
+      <span>
+        <a href="http://twitter.com/santosh79" target="_blank">@santosh79</a>
+      </span>
+      <span>
+        <a href="/images/resume.html">resume</a>
+      </span>
+    </header>
+    <section>
+      <article class="post">
+  <header>
+    <div class="date_article_page">August 9th 2012</div>
+    <h1>Using the watch command to maintain consistency of your Redis dataset</h1>
+  </header>
+
+  <section class="content">
+    <p>As you start using <a href="http://redis.io">Redis</a> more, you soon find yourself delving into <a href="http://redis.io/topics/transactions">redis' transactions</a>. A traditional RDBMS' view of CAS (compare-and-set) transactions is:</p>
+
+<pre><code>a) Lock down the entire database to writes, allowing just the one
+connection in the transaction to write
+b) Perform a query to figure out which things need to change
+(Compare Step)
+c) Change those things (Set step)
+d) Release the lock (this happens automaticaly as part of your
+transaction completing)
+</code></pre>
+
+<p>Redis, on the other hand uses <a href="http://en.wikipedia.org/wiki/Optimistic_locking">Optimistic Locking</a> which makes CAS transactions look like:</p>
+
+<pre><code>a) Start tracking stuff you think could change while you are in
+your transaction
+b) Perform a query to figure out which things need to change
+(Compare Step)
+c) Execute the transaction to change those things
+(Conditional Set)
+d) Check to see if the transaction completed successfully
+e) Repeat from step 1 to re-run transaction or just abort
+</code></pre>
+
+<p>Step 1, where you start <em>tracking</em> stuff prior to doing anything is where <em>Optimistic Locking</em> and the more traditional <em>Pessimistic Locking</em> diverge in a pretty big way.</p>
+
+<h3>Optimistic Locking</h3>
+
+<p>The general idea behind optimistic locking is that you need to know <strong>before hand</strong> what you think might change while you are perform a transaction and watch out for that. Pessimistic locking on the other hand, is a more heavy handed approach where you don&rsquo;t want <em>anything</em> to change while you are in the middle of a transaction. Pessimistic locking, as you might&rsquo;ve guessed, is more punishing on performance and for <em>write heavy</em> datastores like Redis that need to maintain high performance, it just is not an option. The downside with optimistic locking, though is that more of the heavy lifting falls on the engineer, who needs to put in a little more thought while dealing with transactions. Redis ships with a <a href="http://redis.io/commands/watch">watch command</a> that lets you specify what keys you want to keep an eye on, prior to running a multi-exec transaction.</p>
+
+<h3>An example</h3>
+
+<p>All this sounds great, but nothing beats a real-world example to see how to work with this and why it might be harder than you think. Recently, I was working on a task that required me to do just this &ndash; when a user logs into our app, figure all of that users facebook friends who are logged in, in our app and send that over.</p>
+
+<h4>The setup</h4>
+
+<p>The data in our app is structured in the following format:</p>
+
+<pre><code>a) Users are hashes of the format "user|\&lt;user-id\&gt;"
+b) All currently logged-in users have their facebook ID's stored
+in a "logged_in_fb_ids" set
+c) There is a facebook ID to user ID reverse look up hash map
+"fb_id_to_user_id_hash"
+d) Every user has a set of facebook friends ids that contains
+facebook id's of people they are friends with on facebook --
+"fb_friend_ids_for_user|&lt;user-id&gt;"
+</code></pre>
+
+<p>So finding the name of someone given their facebook id would look something like:</p>
+
+<pre><code>fb_id = 123456
+user_id = redis.hget("fb_id_to_user_id_hash", fb_id)
+user_name = redis.hget("user|#{user_id}", "name")
+</code></pre>
+
+<h4>First stab</h4>
+
+<p>Given the above structure of data in the redis dataset a first shot at fetching all of the user_ids for all of my facebook friends who are currently logged in the app right now, might look like:</p>
+
+<pre><code>def fetch_loggedin_fb_friends_for_user(user_id)
+  fb_ids_of_my_friends_who_are_loggedin = redis.sinter("fb_friend_ids_for_user|#{user_id}", "logged_in_fb_ids")
+  user_ids_of_my_fb_friends = redis.multi do |multi|
+    fb_ids_of_my_friends_who_are_loggedin.each do |fb_id|
+      multi.hget("fb_id_to_user_id_hash", fb_id)
+    end
+  end
+  user_ids_of_my_fb_friends
+end
+</code></pre>
+
+<h4>Race condition</h4>
+
+<p>The race condition with this approach is that between the time I figure out the facebook id&rsquo;s of my facebook friends who are currently logged in to my app:</p>
+
+<pre><code>  fb_ids_of_my_friends_who_are_loggedin = redis.sinter("fb_friend_ids_for_user|#{user_id}", "logged_in_fb_ids")
+</code></pre>
+
+<p>And then figuring out the user_id&rsquo;s for those facebook id&rsquo;s, a user could have logged off and I&rsquo;d be incorrectly reporting someone as being logged on when they are not. Granted, in this case, displaying stale data is not a big deal but there is an easy fix.</p>
+
+<p>What I really want is between the between the time I start querying <em>logged_in_fb_ids</em>, to the time I compute the user_ids for those people, <em>no changes should have happened in the logged_in_fb_ids</em> set. If no changes, were made to this set while I was running my transaction I know that the user_ids_of_my_fb_friends data is accurate.</p>
+
+<h4>Fix</h4>
+
+<p>The fix in this case, is as simple as <strong>watch'ing</strong> the logged_in_fb_ids set before kicking off the multi-exec transaction, and then re-running the transaction if something changed.</p>
+
+<pre><code>def fetch_loggedin_fb_friends_for_user(user_id)
+  redis.watch("logged_in_fb_ids")
+  fb_ids_of_my_friends_who_are_loggedin = redis.sinter("fb_friend_ids_for_user|#{user_id}", "logged_in_fb_ids")
+  user_ids_of_my_fb_friends = redis.multi do |multi|
+    fb_ids_of_my_friends_who_are_loggedin.each do |fb_id|
+      multi.hget("fb_id_to_user_id_hash", fb_id)
+    end
+  end
+  user_ids_of_my_fb_friends
+end
+
+failed_cnt = 0
+RETRY = 3
+my_loggedin_fb_friends = fetch_loggedin_fb_friends_for_user(my_user_id)
+while failed_cnt &lt; RETRY &amp;&amp; !my_loggedin_fb_friends
+  my_loggedin_fb_friends = fetch_loggedin_fb_friends_for_user(my_user_id)
+end
+</code></pre>
+
+<p>Here, we&rsquo;ve chosen to retry 3 times, someone else might choose to abort the transaction. Your strategy for handling failed CAS transactions would depend on the situation.</p>
+
+<h3>TLDR;</h3>
+
+<p>Redis' <a href="http://redis.io/commands/watch">watch command</a> is what you should be using for CAS transactions.</p>
+
+  </section>
+
+  <section class="comments">
+
+    <div id="disqus_thread"></div>
+    <script type='text/javascript' src='http://santosh-log.disqus.com/embed.js'></script>
+    <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    <a href="http://disqus.com" class="dsq-brlink">blog comments powered by <span class="logo-disqus">Disqus</span></a>
+
+
+  </section>
+</article>
+
+ 
+    </section>
+  
+  
+  
+  
+  
+  
+  </body>
+</html>
+

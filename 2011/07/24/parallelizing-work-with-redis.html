@@ -1,0 +1,209 @@
+<!doctype html>
+<html>
+  <head>
+    <link rel="stylesheet" type="text/css" href="/css/main.css">
+    <link rel="alternate" type="application/atom+xml" title="Parallelizing Work with Redis - feed" href="/index.xml" />
+
+    <script type="text/javascript">
+      if((navigator.userAgent.match(/iPad/i))) {
+        document.write("<meta name=\"viewport\" content=\"width=device-width; initial-scale=1.0; maximum-scale=1.0; user-scalable=0;\" />");
+      } else if((navigator.userAgent.match(/iPhone/i))) {
+        document.write("<meta name=\"viewport\" content=\"width=device-width; initial-scale=0.5; maximum-scale=1.0; user-scalable=1;\" />");
+      }
+    </script>
+
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/> 
+    <title>Parallelizing Work with Redis</title>
+  </head>
+  <body>
+    <header id="main_header">
+      <span>
+        <a href="/">blog</a>
+      </span>
+      <span>
+        <a href="http://santosh79.tumblr.com" target="_blank">tumblog</a>
+      </span>
+      <span>
+        <a href="http://github.com/santosh79/" target="_blank">github</a>
+      </span>
+      <span>
+        <a href="http://twitter.com/santosh79" target="_blank">@santosh79</a>
+      </span>
+      <span>
+        <a href="/images/resume.html">resume</a>
+      </span>
+    </header>
+    <section>
+      <article class="post">
+  <header>
+    <div class="date_article_page">July 24th 2011</div>
+    <h1>Parallelizing Work with Redis</h1>
+  </header>
+
+  <section class="content">
+    <p>Anyone who has heard of <a href="http://redis.io">Redis</a> has probably also heard of <a href="https://github.com/defunkt/resque">Resque</a>, which is a lightweight queue'ing system. To the uninitiated it might seem strange, or maybe even impossible, to construct a queue'ing system using just a key-value store. In this article, I&rsquo;m going to break down some of the primitives redis exposes that make building a queue'ing system over it trivial and show how Redis is so much more than just a key-value store.</p>
+
+<h3>The problem</h3>
+
+<p>Let&rsquo;s say, you are a mathematician and have just come up with this super performant way of computing factors of numbers. You decide to write up the following sinatra service:</p>
+
+<pre><code>def compute_factors(number)
+  factors = crazy_performant_computation number
+end
+
+get "/compute_factors" do
+  number, post_back_url = params[:number].to_i, params[:post_back_url]
+  RestClient.post post_back_url, factors =&gt; compute_factors(number).to_json
+  "OK"
+end
+</code></pre>
+
+<p>You soon start seeing crazy traffic and realize, performant as your factor computation algorithm is, it&rsquo;s not fast enough to keep up with the speed at which you are getting requests to your service.</p>
+
+<h3>First pass at optimization by forking</h3>
+
+<p>You realize that it&rsquo;s going to be far more efficient to fork off a new Process or Thread and have that perform the computation and post back the result. So your code now changes to:</p>
+
+<pre><code>get "/compute_factors" do
+  number, post_back_url = params[:number].to_i, params[:post_back_url]
+  Process.fork do
+    RestClient.post post_back_url, factors =&gt; compute_factors(number).to_json
+  end
+  "OK"
+end
+</code></pre>
+
+<p>While, this is great you soon realize that filling up the process table in your OS is not such a good idea.</p>
+
+<h3>Capping process creation using a process pool</h3>
+
+<p>It is exactly this problem that a process pool was meant to solve. The basic idea is that you would still like to perform your time-intensive task in the background, but would like to put a cap on the number of background processes you have running. There are some excellent libraries that solve this problem such as <a href="https://github.com/tobi/delayed_job">Delayed Job</a> and Resque. However, being the hacker that you are, you decide to roll one yourself. There are however a bunch of issues that these libraries solve and you decide to pull a pen and paper and note them down to ensure that you are not missing anything:</p>
+
+<h4>Cap how many workers you create</h4>
+
+<p>You need to have a way to cap the number of background workers you create, that way you don&rsquo;t have the same problem you were having before.</p>
+
+<h4>Control worker creation and destruction</h4>
+
+<p>You would like to be able to boot up and bring down your workers reasonably gracefully.</p>
+
+<h4>Handle race conditions</h4>
+
+<p>You realize, that spinning new processes means that you now have to ensure your code is concurrent-safe. Redis provides, some wonderful atomic operations out-of-the-box so this shouldn&rsquo;t be too hard.</p>
+
+<h3>Second pass using BRPOP</h3>
+
+<p>Redis supports a couple of interesting data-structures including lists, sets and hashes. Redis lists have a command called <a href="http://redis.io/commands/rpop">RPOP</a> which basically lets you pop an item off the tail of a list, in essence treating it like a queue. The RPOP command comes with a blocking variant of itself called <a href="http://redis.io/commands/brpop">BRPOP</a> that blocks on the call to popping an element from the list. You can also specify a timeout for how long (in seconds) you would like to block on the call.</p>
+
+<pre><code>def compute_factors(number)
+  factors = crazy_performant_computation number
+end
+
+NUMBER_OF_WORKERS = (ENV['NUMBER_OF_WORKERS'] || 50).to_i
+NUMBER_OF_WORKERS.times do
+  Process.fork do
+    redis = Redis.new
+    loop do
+      val = redis.brpop "work_queue", 1
+      unless val
+        puts "Process: #{Process.pid} is exiting"
+        exit 0
+      end
+
+      number, postback_url = Marshal.load val.last
+      RestClient.post postback_url, factors =&gt; compute_factors(number).to_json
+    end
+  end
+end
+
+redis = Redis.new
+get "/compute_factors" do
+  number, post_back_url = params[:number].to_i, params[:post_back_url]
+  redis.lpush "work_queue", Marshal.dump([number, post_back_url])
+  "OK"
+end
+</code></pre>
+
+<p>So you now have solved a bunch of problems in this new approach. We have a fixed number of workers running to handle our background processing - so now our process table getting filled is not subject to traffic conditions. Race conditions are handled for us by Redis, since BRPOP is atomic and guarantees no two workers will do duplicate work. And finally, workers destroy themselves if they break out of the brpop call due to their timeout being hit, in this case 1 second. So, that&rsquo;s quite a slew of problems that have been solved for us by virtue of just using redis. We soon start, seeing a different problem though. As traffic in our site lags, workers seem to be dying off since their timeout is being hit. We&rsquo;d really like to now have the workers block for a longer time than just 1 second, while also having the option to kill them off sooner if we need to. That way, they&rsquo;ll not be hanging around for any longer than they have to.</p>
+
+<h3>Gracefully shutting down workers</h3>
+
+<p>Our mandate now is to shutdown our workers gracefully, using redis and little bit of UNIX signals magic (for examples of using signals in this area checkout <a href="http://tomayko.com/writings/unicorn-is-unix">Unicorn Is Unix</a> and the <a href="http://unicorn.bogomips.org/SIGNALS.html">Unicorn</a> web-server. Our code now morphs to:</p>
+
+<pre><code>def compute_factors(number)
+  factors = crazy_performant_computation number
+end
+
+NUMBER_OF_WORKERS = (ENV['NUMBER_OF_WORKERS'] || 50).to_i
+NUMBER_OF_WORKERS.times do
+  Process.fork do
+    redis = Redis.new
+    loop do
+      val = redis.brpop "work_queue", 30
+      unless val
+        puts "Process: #{Process.pid} is signing off due to timeout!"
+        exit 0
+      end
+
+      if val.last == "DIE!"
+        puts "Process: #{Process.pid} has been asked to kill itself by parent"
+        exit 0
+      end
+
+      number, postback_url = Marshal.load val.last
+      RestClient.post postback_url, factors =&gt; compute_factors(number).to_json
+    end
+  end
+end
+
+
+redis = Redis.new
+get "/compute_factors" do
+  number, post_back_url = params[:number].to_i, params[:post_back_url]
+  redis.lpush "work_queue", Marshal.dump([number, post_back_url])
+  "OK"
+end
+
+`echo #{Process.pid} &gt; /tmp/factors.pid`
+puts "Parent process wrote PID to /tmp/factors.pid"
+
+trap('QUIT') do
+  NUMBER_OF_WORKERS.times do
+    redis.lpush "work_queue", "DIE!"
+  end
+end
+</code></pre>
+
+<p>We have now bumped up the timeout to 30 seconds and also have in place a way to bring down the workers near instantly. This is accomplished by the web-server trapping the QUIT signal and when it does, it pushes a &ldquo;DIE!&rdquo; message onto the redis &ldquo;work_queue&rdquo;. It pushes this message the same number of times as the NUMBER_OF_WORKERS. And since BRPOP is an atomic and concurrent-safe operation we are now supporting the bringing down of workers via redis. How cool is that! To gracefully shutdown the server and workers we just need to:</p>
+
+<pre><code>kill -s QUIT `cat /tmp/factors.pid`
+</code></pre>
+
+<h3>Conclusion</h3>
+
+<p>The next time you need to get some background job action going, stop yourself from just grabbing a library. Instead, toy around with <a href="http://redis.io/commands#list">redis lists</a> a little. You&rsquo;ll be surprised by how much you can accomplish with just straight redis primitives.</p>
+
+  </section>
+
+  <section class="comments">
+
+    <div id="disqus_thread"></div>
+    <script type='text/javascript' src='http://santosh-log.disqus.com/embed.js'></script>
+    <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    <a href="http://disqus.com" class="dsq-brlink">blog comments powered by <span class="logo-disqus">Disqus</span></a>
+
+
+  </section>
+</article>
+
+ 
+    </section>
+  
+  
+  
+  
+  
+  
+  </body>
+</html>
+

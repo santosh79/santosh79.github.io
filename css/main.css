@@ -1,0 +1,147 @@
+ol, ul {
+  list-style: none;
+}
+table {
+  border-collapse: codellapse;
+  border-spacing: 0;
+}
+html { margin: 20px }
+body {
+  width: 660px;
+  font-family : 'Menlo', 'Monaco';
+  font-size: 17px;
+  line-height: 1;
+  margin: 0 auto;
+  background-color: white;
+  line-height: 1.75;
+  color: #666;
+}
+header, footer, section, article {
+  display: block;
+}
+#content {
+}
+#by {
+  font-style: italic;
+  margin-right: 5px;
+  font-size: 28px;
+}
+#caption {
+  position: absolute;
+  font-size: 24px;
+  margin: -135px 0 0 70px;
+}
+#path {
+  color: #b53131;
+}
+.date {
+  font-style: italic;
+  /*float: right;*/
+  line-height: 43px;
+}
+a {
+  color: #b83000;
+}
+h1 {
+  color: #231f20;
+  font-size: 20px;
+}
+
+h1 a {
+  color: black;
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+.post header {
+  margin-bottom: 10px;
+}
+.post .body p:first-child {
+  margin-top: 0;
+}
+.post .body p:last-child {
+  margin-bottom: 0;
+}
+.post {
+  margin-top: 30px;
+}
+.post:last-child {
+  margin-bottom: 10px;
+}
+.post p {
+  margin: 10px 0;
+}
+.post .more {
+ font-style: italic;
+}
+.more a {
+  text-decoration: none;
+}
+.more a:hover { text-decoration: underline }
+body > header {
+  display: block;
+  padding-top: 30px;
+  line-height: 180px;
+  margin-bottom: 20px;
+}
+h2, h3, h4, h5 {
+  font-weight: 600;
+}
+h1, h2 {
+  margin: 0;
+}
+h3, h4, h5 {
+  margin-top: 30px;
+  margin-bottom: -9px;
+}
+h3 {
+  display: block;
+  margin-top: 28px;
+}
+h5 {
+  font-size: 1em;
+}
+ul, li {
+  list-style-type: none;
+}
+code {
+  font-family: 'Menlo', 'Courier', 'mono';
+  font-size: 90%;
+  background-color: whitesmoke;
+  color: black;
+}
+pre {
+  padding: 20px;
+  background-color: whitesmoke;
+  color: black;
+  line-height: 1.5;
+  font-size: 15px;
+  word-wrap: break-word;
+}
+body > footer {
+  text-align: left;
+  margin-left: 10px;
+  font-style: italic;
+  font-size: 1.125em;
+  color: #888;
+}
+
+#main_header {
+  padding-top: 0px;
+  margin-bottom: 0px;
+  line-height: 78px;
+  font-size : 19px;
+}
+
+.date_main_page {
+  color: #666;
+  font-weight: 300;
+  font-size: .9em;
+}
+.date_article_page {
+  color: #333;
+  font-weight: 300;
+  margin-bottom: 1em;
+  /*padding-bottom: 1em;*/
+}

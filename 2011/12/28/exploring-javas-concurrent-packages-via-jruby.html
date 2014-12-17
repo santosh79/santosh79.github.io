@@ -1,0 +1,158 @@
+<!doctype html>
+<html>
+  <head>
+    <link rel="stylesheet" type="text/css" href="/css/main.css">
+    <link rel="alternate" type="application/atom+xml" title="Exploring Java's concurrent packages via JRuby - feed" href="/index.xml" />
+
+    <script type="text/javascript">
+      if((navigator.userAgent.match(/iPad/i))) {
+        document.write("<meta name=\"viewport\" content=\"width=device-width; initial-scale=1.0; maximum-scale=1.0; user-scalable=0;\" />");
+      } else if((navigator.userAgent.match(/iPhone/i))) {
+        document.write("<meta name=\"viewport\" content=\"width=device-width; initial-scale=0.5; maximum-scale=1.0; user-scalable=1;\" />");
+      }
+    </script>
+
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/> 
+    <title>Exploring Java's concurrent packages via JRuby</title>
+  </head>
+  <body>
+    <header id="main_header">
+      <span>
+        <a href="/">blog</a>
+      </span>
+      <span>
+        <a href="http://santosh79.tumblr.com" target="_blank">tumblog</a>
+      </span>
+      <span>
+        <a href="http://github.com/santosh79/" target="_blank">github</a>
+      </span>
+      <span>
+        <a href="http://twitter.com/santosh79" target="_blank">@santosh79</a>
+      </span>
+      <span>
+        <a href="/images/resume.html">resume</a>
+      </span>
+    </header>
+    <section>
+      <article class="post">
+  <header>
+    <div class="date_article_page">December 28th 2011</div>
+    <h1>Exploring Java's concurrent packages via JRuby</h1>
+  </header>
+
+  <section class="content">
+    <p>Threads are <a href="http://confreaks.net/videos/709-rubyconf2011-threading-versus-evented">back in style</a> these days. If you were like me, a Java engineer getting into Ruby couple years back, you probably would have seen your fair share of JVM bashing by a few people who relished beating on all things Java, while peddling their half-assed gems as software masterpieces. This is not to say that Java, especially it&rsquo;s community, loves to over-engineer the crap out of everything they can lay their hands on, but (and this is a pretty big BUT) the JVM <strong>is</strong> a seminal piece of software. Okay, if you are still hanging around after this rant, I thank you for affording me this indulgence.</p>
+
+<p>Having gotten that out of the way, for the next couple of posts I&rsquo;ll work on exploring some of the concurrency packages Java ships with, along with discussing the Java concurrency model, all the while using <a href="http://www.jruby.org">JRuby</a> to drive my code.</p>
+
+<h4>Why JRuby?</h4>
+
+<p>As much as I hate the irrational bashing of another language, I&rsquo;ve really grown to love working with Ruby. It&rsquo;s just great for &ldquo;putting your ideas down on paper&rdquo;, with minimal ceremony. While for many, this ceremony may not feel like a big deal, <em>it actually is</em>. <a href="http://confreaks.net/videos/724-rockymtnruby2011-cognitive-psychology-and-the-zen-of-code">This talk on cognitive pyschology</a> goes into further detail as to how our brain processes information, and how boiler plate code comes in the way of other engineers understanding your code. Using JRuby also has a unintended benefit of really forcing me to concentrate just on the <em>concurrency and parallelism</em> concepts, without wasting a lot of time of on all <em>those</em> Java'ish things such as <em>final</em> variables or <em>private static</em> methods, amongst others. It&rsquo;s also going to be a lot more fun focussing only on the awesome things of the Java concurrency packages, while skipping all of the code bloat that is part and parcel of working with Java.</p>
+
+<h4>Concurrency and Parallelism</h4>
+
+<p>The terms concurrency and parallelism get thrown around a lot and I for one didn&rsquo;t really understand the difference until I bothered looking it up recently. Here&rsquo;s a diagram that should help clear it up:</p>
+
+<p><img src="https://img.skitch.com/20111228-tar8qi6crxbmdkwwu795nqt7d9.medium.jpg" alt="Concurrency Diagram" /></p>
+
+<p>As you can see, concurrency doesn&rsquo;t mean squat. In the concurrent graph, Thread A runs from time 0-10 and then the CPU scheduler schedules Thread B to run from time 10-20, after which it switches back to Thread A and so on and so forth. So the machine is not actually executing CPU instructions <em>at the same time</em>. In the parallel graph, the machine <strong>does execute instructions on both threads at the same time</strong> between time 10 and time 30. All this is assuming you have a multi-core CPU of course (if you don&rsquo;t you probably don&rsquo;t really want to be reading this or any other blog post on parallelizing work).</p>
+
+<h4>Thread Safety</h4>
+
+<p>Now that we have understood that parallelism, is really what we are after, we can look at the various <em>problems</em> that arise when you have your code run in a multi-threaded parallel environment. These <em>problems</em> that crop up are all grouped under the broad umbrella called <em>thread safety</em>. So before we look at each of these problems let&rsquo;s first try and get a sense of what it means to be thread safe.</p>
+
+<p>The simplest way to define what it means to be thread safe is, the <strong>invariant</strong> of your code is preserved even while running in a multi-threaded environment. What this means, is that, whatever behavior your code said it would exhibit does not change whether it&rsquo;s running in a single or multi-threaded environment. An example, will help make this clear:</p>
+
+<pre><code>class Incrementer
+  def increment
+    @val ||= 0
+    @val += 1
+  end
+end
+
+incrementer = Incrementer.new
+incrementer.increment
+</code></pre>
+
+<p>Now as you can see, the behavior this class is promising to uphold is an <a href="http://en.wikipedia.org/wiki/Arithmetic_progression">arithmetic series</a> where every element the <em>increment</em> function returns is 1 greater than the last element it returned. This is the <em>invariant</em> of this code. Now, with a little unlucky timing, in a multi-threaded environment, this invariant can be broken and this function can skip numbers or return the same number it did in it&rsquo;s previous call. The following line:</p>
+
+<pre><code>    @val += 1
+</code></pre>
+
+<p>Is not actually an atomic operation, i.e. a computer operation that is exactly one instruction. Rather, it can be thought of as two discrete operations:</p>
+
+<pre><code>    temp = @val + 1   - (1)
+    @val = temp       - (2)
+</code></pre>
+
+<p>With a little unlucky timing, line (1) could complete by Thread A and then Thread B could run and re-execute line (1) in which case it&rsquo;s reading a <em>stale</em> value of @val. There is also the initialization of the variable, which is not Thread safe, but I&rsquo;ll leave that for a later discussion. So how do we make this code thread safe?</p>
+
+<h4>Synchronization and locks</h4>
+
+<p>One of the easiest ways we can make this code thread safe is by requiring that whenever a given Thread is scheduled to run by the CPU scheduler it needs to have a <em>lock</em>. If it does not, it should do nothing and go back to waiting. Java has a keyword called <em>synchronized</em> that let&rsquo;s a Thread try to acquire a lock on an Object. The thread safe version of the incrementer with this in, looks like:</p>
+
+<pre><code>require 'java'
+
+class Incrementer &lt; java.lang.Object
+  def increment
+    self.synchronized do
+      @val ||= 0
+      @val += 1
+    end
+  end
+end
+
+incrementer = Incrementer.new
+incrementer.increment
+</code></pre>
+
+<p>The call to <strong>self.synchronized</strong> tries to acquire a lock on <em>self</em> which in this would be the instance <em>incrementer</em> of the <em>Incrementer</em> class. Couple of things to note here:
+    - In order to be able to synchronize on an Object, that Object
+      should have a <em>java.lang.Object</em> object somewhere it&rsquo;s ancestry tree
+    - Ensure that all your threads synchronize on the same Object, or
+      they&rsquo;ll be getting/releasing different locks</p>
+
+<p>This code is actually a case of over-synchronization, and over-synchronization is bad in that, it is slow. To give you a taste of some of the cool, Java packages we can use, here&rsquo;s an altered version:</p>
+
+<pre><code>  def increment
+    self.synchronized do
+      @val ||= java.util.concurrent.atomic.AtomicInteger.new
+    end
+    @val.incrementAndGet
+  end
+</code></pre>
+
+<p>Here we still need to guard a section of our code where we initialize our instance variable. But as soon as we have verified we have a valid reference, we release the lock and call the incrementAndGet method made available to us by Java&rsquo;s AtomicInteger objects.</p>
+
+<h4>Conclusion</h4>
+
+<p>Thread safety is when the behavior of your code does not change when it&rsquo;s run in either a single or multi-threaded environment. Java&rsquo;s synchronized keyword is the simplest form of Thread safety, that uses a concept called <strong>locking</strong> where, only a Thread that has acquired a lock is permitted to run. JRuby gets for free a lot of the Java concurrent packages and this is great news for engineers looking to build parallelizable code but are not yet ready to give up on ruby.</p>
+
+<h4>Up next</h4>
+
+<p>Sharing data, thread visibility, volatile variables, thread safe initialization and immutable objects and how they rock!</p>
+
+  </section>
+
+  <section class="comments">
+
+    <div id="disqus_thread"></div>
+    <script type='text/javascript' src='http://santosh-log.disqus.com/embed.js'></script>
+    <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    <a href="http://disqus.com" class="dsq-brlink">blog comments powered by <span class="logo-disqus">Disqus</span></a>
+
+
+  </section>
+</article>
+
+ 
+    </section>
+  
+  
+  
+  
+  
+  
+  </body>
+</html>
+

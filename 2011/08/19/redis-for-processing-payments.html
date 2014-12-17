@@ -1,0 +1,223 @@
+<!doctype html>
+<html>
+  <head>
+    <link rel="stylesheet" type="text/css" href="/css/main.css">
+    <link rel="alternate" type="application/atom+xml" title="Redis for processing payments - feed" href="/index.xml" />
+
+    <script type="text/javascript">
+      if((navigator.userAgent.match(/iPad/i))) {
+        document.write("<meta name=\"viewport\" content=\"width=device-width; initial-scale=1.0; maximum-scale=1.0; user-scalable=0;\" />");
+      } else if((navigator.userAgent.match(/iPhone/i))) {
+        document.write("<meta name=\"viewport\" content=\"width=device-width; initial-scale=0.5; maximum-scale=1.0; user-scalable=1;\" />");
+      }
+    </script>
+
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/> 
+    <title>Redis for processing payments</title>
+  </head>
+  <body>
+    <header id="main_header">
+      <span>
+        <a href="/">blog</a>
+      </span>
+      <span>
+        <a href="http://santosh79.tumblr.com" target="_blank">tumblog</a>
+      </span>
+      <span>
+        <a href="http://github.com/santosh79/" target="_blank">github</a>
+      </span>
+      <span>
+        <a href="http://twitter.com/santosh79" target="_blank">@santosh79</a>
+      </span>
+      <span>
+        <a href="/images/resume.html">resume</a>
+      </span>
+    </header>
+    <section>
+      <article class="post">
+  <header>
+    <div class="date_article_page">August 19th 2011</div>
+    <h1>Redis for processing payments</h1>
+  </header>
+
+  <section class="content">
+    <p>In this post I am going to go through the process of constructing a <em>workflow</em> using payments as an example. As you work more with Redis you soon start finding yourself building out workflow&rsquo;s, i.e. small pieces of code that talk to each other via Redis. For someone familiar with a Service Oriented approach to building systems this should feel like deja-vu. Except, instead of using a protocol (HTTP, TCP, UDP, AMQP, ZeroMQ) we are going back to CS101 using a good old queue datastructure.</p>
+
+<p>It might strike many as crazy, building a payment processing workflow using anything other than a traditional RDBMS. I would like to argue though, that many of the perceived strengths you think a traditional RDBMS provides in terms of transactionality can be very easily constructed with Redis.</p>
+
+<p>There is the concern of redis keeping it&rsquo;s stuff in volatile memory and if the machine running the redis server crashes, then everything since the last bgsave is lost. But those very same rules apply to a regular database as well. You could up the frequency with which redis does a fsync and have it write to disk on every write, much like a RDBMS. What if the disk gets wiped? In that case you could take the very same precautions you would with a RDBMS, i.e. replication. I personally, fall in the camp of favoring replication and think it invalidates the need to have paranoid disk writes (which kill the performance redis gives you). Having gotten that out of the way, let&rsquo;s proceed with building out a fast, correct, reliable and robust payment processor using the atomic tools that redis gives you.</p>
+
+<h3>Modus operandi</h3>
+
+<p>We want to keep each of the players in our workflow light, simple and preferably singularly focused. This will help us scale our system, identify problems more easily and most importantly be far easier to maintain than a monolithic beast. With this in mind, our worflow can be thought of as follows:</p>
+
+<pre><code>- A HTTP API allowing users to submit payments into our workflow. 
+    This generates a unit of work that get's handled by the workers.
+- Workers that act on the work generated from our API
+</code></pre>
+
+<p>Our plan is going to be:
+    - Expose a HTTP API that let&rsquo;s users submit payments
+    - Keep our controller minimal, have it just create a model and call it a day
+    - Have the model process the payment asynchronously
+    - Think about handling cases for when things don&rsquo;t go according to plan
+    - Have a way to figure which payments are taking unduly long to process etc.</p>
+
+<h3>The HTTP API</h3>
+
+<p>To keep things simple, let&rsquo;s assume we have the following code running in Ruby-on-Rails that exposes our payment processor via HTTP:</p>
+
+<pre><code>class PaymentController &lt; ApplicationController
+  def create
+    Payment.create! params[:payment]
+    render :json =&gt; {:status =&gt; "OK"}
+  end
+end
+</code></pre>
+
+<h3>The Model layer</h3>
+
+<p>In keeping with the MVC goodness, here&rsquo;s our model layer:</p>
+
+<pre><code>class Payment
+  def self.create!
+    raise ArgumentError unless params[:payer_id], params[:recipient_id], 
+                                params[:amount]
+    redis.rpush 'payments_to_be_processed', 
+      params[:payment].merge(:tracking_id =&gt; redis.incr('tracking_ids')).to_json
+  end
+end
+</code></pre>
+
+<p>Looking back at the list of bullet points, it looks like we have accomplished the first three points: we have a super simple HTTP API, both our controller and model code are minimal and we have paved the road for processing payments asynchronously with the <strong>payments_to_be_processed</strong> list. Pretty awesome stuff, now all that&rsquo;s left to be done is figure out the back-end. How do we keep track of payments as they flow through the various states of being <em>processed</em>, what are the metrics we think we are going to be needing and how do we go about storing them, what are the race conditions we need to guard against etc.?</p>
+
+<h3>Payment Processing stub</h3>
+
+<p>For the purposes of this discussion let&rsquo;s not worry about actually processing a payment (there are several well documented services out there such as <a href="http://www.braintreepayments.com/">braintree</a>, <a href="http://recurly.com/">recurly</a> etc. that make it straightforward). To get the ball rolling I&rsquo;m going to be assuming that we have the following piece of code that we are going to be calling to process our payment:</p>
+
+<pre><code>def process_payment(payer_id, recipient_id, amount)
+  rand_val = (rand * 10).to_i
+  if rand_val &gt; 3
+    return :status =&gt; :success, 
+      :txn_id =&gt; redis.incr("txn_ids"), :processed_on =&gt; Time.new.getutc.to_i
+  elsif rand_val &lt; 7
+    return :status =&gt; :insufficient_funds, 
+      :txn_id =&gt; redis.incr("txn_ids"), :processed_on =&gt; Time.new.getutc.to_i
+  else
+    return :status =&gt; :api_error, :processed_on =&gt; Time.new.getutc.to_i
+  end
+end
+</code></pre>
+
+<p>As you can see, this method can have one of three possible outcomes:
+    - success
+    - insufficient funds
+    - api error (we were not able to connect with our payment service)</p>
+
+<p>This might strike many as naive, but this is by no means attempting to be an exhaustive monograph on what can go wrong when processing payments. Instead, what I&rsquo;d like to focus on is, given a finite list of possible outcomes when processing a payment how do I use redis to process the payment accurately and recover gracefully from when things go bad.</p>
+
+<p>(Note: In this method, I work with time in integer UTC format. Highly recommend this when working with redis.)</p>
+
+<h3>Payment Processing Workers</h3>
+
+<p>Given the list of three possible outcomes, it&rsquo;s a no-brainer that in our payment processing workers we are going to need to handle these three conditions. With that in mind, here&rsquo;s a first stab at it:</p>
+
+<pre><code>loop do
+  payment      = JSON.parse(redis.brpop("payments_to_be_processed")[1])
+  tracking_id  = payment['tracking_id']
+  payer_id     = payment["payer_id"]
+  recipient_id = payment["recipient_id"]
+  amount       = payment["amount"]
+  results      = process_payment payer_id, recipient_id, amount
+  if results[:status] == :success
+    redis.zadd "successful_txns", results[:processed_on], results[:txn_id]
+    redis.hmset "txns", results[:txn_id], payment.merge(:tracking_id =&gt; tracking_id).to_json
+    redis.zadd "payments_made_by|#{payer_id}", results[:processed_on], results[:txn_id]
+    redis.zadd "payments_received_by|#{recipient_id}", results[:processed_on], results[:txn_id]
+  elsif results[:status] == :insufficient_funds
+    redis.zadd "insufficient_funds_txns", results[:processed_on], results[:txn_id]
+    redis.hmset "txns", results[:txn_id], payment.merge(:tracking_id =&gt; tracking_id).to_json
+    redis.zadd "insufficient_funds_for|#{payer_id}", results[:processed_on], results[:txn_id]
+    redis.zadd "insufficient_funds_to|#{recipient_id}", results[:processed_on], results[:txn_id]
+  else
+    redis.zadd "api_errors", results[:processed_on], {:payment_id =&gt; payment_id}.to_json
+  end
+end
+</code></pre>
+
+<p>This looks like a pretty impressive first stab at the problem. We have:
+    1. Handled (maybe not completely) for our three cases when processing a payment.
+    2. A way to figure out the status of a payment by looking in the lists:
+       - successful_txns
+       - insufficient_funds_txns
+       - api_errors</p>
+
+<p>Each worker pulls out a JSON'ified hash that contains details on who is paying whom and the amount. The worker then tries processing the payment and depending on whether it was successful or failed adds it to further redis datastructures. One thing I&rsquo;d like to point out here, is that whenever possible I lean towards using a sorted set instead of a set with a UTC timestamp as the score. This let&rsquo;s me perform range queries such as how many successful transactions were performed today in total, how many payments has a given user made or received in a given time-frame etc. Anytime you can see yourself needing a set, think a little deeper to see if a sorted set may be a better fit. Coming back to the code above, one thing we&rsquo;d like to guard against is ensuring that irrespective of the outcome of the payment when we note down the status in some of our datastructures it&rsquo;s a really good idea to do it in one fell swoop. To be a little clearer, if a transaction was successful we want to ensure that it either get&rsquo;s added of <strong>successful_txns</strong>, <strong>txns</strong>, <strong>payments_made_by</strong> and <strong>payments_received_by</strong> or none.</p>
+
+<h3>Transactionality using multi-exec</h3>
+
+<p>To do this we use redis' built-in transactionality primitives, multi and exec. The updated code is as follows:</p>
+
+<pre><code>loop do
+  ...
+  if results[:status] == :success
+    redis.multi
+    redis.zadd "successful_txns", results[:processed_on], results[:txn_id]
+    ...
+    redis.exec
+  elsif results[:status] == :insufficient_funds
+    redis.multi
+    ...
+    redis.exec
+  else
+    redis.zadd "api_errors", results[:processed_on], {:payment_id =&gt; payment_id}.to_json
+  end
+end
+</code></pre>
+
+<h3>Keeping track of Queue size</h3>
+
+<p>Here&rsquo;s a super simple queue size tracker:</p>
+
+<pre><code>loop do
+  if redis.llen("payments_to_be_processed") &gt; 100_000
+    send_pager(:to =&gt; "ops", :msg =&gt; "queue is getting backed up") 
+  end
+  sleep 1*60 #for a minute
+end
+</code></pre>
+
+<p>Here 100_000 is totally a number I pulled out of thin air. You can/should have it configurable. You also needn&rsquo;t worry about this tracker bringing down your redis server. Believe me, redis can handle a <a href="http://redis.io/commands/llen">llen</a> O(1) operation every 60 seconds! :)</p>
+
+<h3>Scaling</h3>
+
+<p>Let&rsquo;s say your HTTP API is pumping more payments than you are capable of processing and you would like to process them a little faster. Simple &ndash; just increase the number of workers you have running and you will horizontally scale.</p>
+
+<h3>Conclusion</h3>
+
+<p>The big takeaway I&rsquo;d like for you to have from reading this post is a feel for working with redis. This post is not about building a payment system (even though the title says that it is). It is about building tiny services that have a singular purpose and that talk to each other using Redis. Some of the code in this post might be wrong and some of the assumptions I make may be wrong as well. But the general gist of building a workflow consisting of small services that talk with each other via Redis is right.</p>
+
+  </section>
+
+  <section class="comments">
+
+    <div id="disqus_thread"></div>
+    <script type='text/javascript' src='http://santosh-log.disqus.com/embed.js'></script>
+    <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    <a href="http://disqus.com" class="dsq-brlink">blog comments powered by <span class="logo-disqus">Disqus</span></a>
+
+
+  </section>
+</article>
+
+ 
+    </section>
+  
+  
+  
+  
+  
+  
+  </body>
+</html>
+

@@ -1,0 +1,195 @@
+<!doctype html>
+<html>
+  <head>
+    <link rel="stylesheet" type="text/css" href="/css/main.css">
+    <link rel="alternate" type="application/atom+xml" title="Git bisect - feed" href="/index.xml" />
+
+    <script type="text/javascript">
+      if((navigator.userAgent.match(/iPad/i))) {
+        document.write("<meta name=\"viewport\" content=\"width=device-width; initial-scale=1.0; maximum-scale=1.0; user-scalable=0;\" />");
+      } else if((navigator.userAgent.match(/iPhone/i))) {
+        document.write("<meta name=\"viewport\" content=\"width=device-width; initial-scale=0.5; maximum-scale=1.0; user-scalable=1;\" />");
+      }
+    </script>
+
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/> 
+    <title>Git bisect</title>
+  </head>
+  <body>
+    <header id="main_header">
+      <span>
+        <a href="/">blog</a>
+      </span>
+      <span>
+        <a href="http://santosh79.tumblr.com" target="_blank">tumblog</a>
+      </span>
+      <span>
+        <a href="http://github.com/santosh79/" target="_blank">github</a>
+      </span>
+      <span>
+        <a href="http://twitter.com/santosh79" target="_blank">@santosh79</a>
+      </span>
+      <span>
+        <a href="/images/resume.html">resume</a>
+      </span>
+    </header>
+    <section>
+      <article class="post">
+  <header>
+    <div class="date_article_page">March 26th 2011</div>
+    <h1>Git bisect</h1>
+  </header>
+
+  <section class="content">
+    <p><a href="http://gitref.org/" title="Git">Git</a> is an awesome version control system. If you are managing large teams and lie awake in bed dreading the next <em>release date</em>, knowing at the back of your mind that all hell is going to break loose; then you absolutely owe it to yourself to consider using git.</p>
+
+<p>While the enterprise world is still stuck with vendored version control products (Clearcase etc..) the open source world/startup world has gone the Git way. At <a href="http://www.manilla.com" title="Manilla LLC">manilla</a> where I work at, we have about 20 engineers, continuously working on <em>features</em> for our app, using a Rapid Prototyping web framework called <a href="" title="http://rubyonrails.org/&quot; &quot;Rails">Ruby on Rails</a>. The fact that our version control system, allows us to crank out code fast while not completely obliterating the stuff someone else had worked on, is a testament to Git being the real enabler in our organization.</p>
+
+<p>In this post, I am going to write about one of the many things that make Git awesome, i.e. the ability to determine when your code base <a href="http://en.wikipedia.org/wiki/Regression_testing" title="Regression Bug">regressed</a> using the <em>bisect</em> command. Regression is just a fancy way of saying, you had stuff working before, now it doesn&rsquo;t and you want to know what was the change you made that&rsquo;s causing it to not work now. Before I talk bisect, here&rsquo;s a quick primer on just how Git works.</p>
+
+<h3>Git 101</h3>
+
+<p>One of the many ways Git is different from a traditional version control system is that it&rsquo;s distributed. What this means to Joe engineer, is that when he clone&rsquo;s (checkout in regular version system parlance) a git repository, he in effect grabs the <em>entire</em> history of that repository. So, in the increasingly probable event, that the server hosting you&rsquo;re central repository comes crashing down, everyone on that project has a copy of it &amp; recovery is trivial.</p>
+
+<h4>The commit</h4>
+
+<p>The central player in Git is a <em>commit</em>. If you are coming from a different versioning system, you probably already have a rough idea of what a commit is; but for those that don&rsquo;t - A commit is when you have performed a unit of work (like say, changing the image logo of your web site), are happy with the results and would like to publish it. You then <em>commit</em> your changes &amp; it get&rsquo;s logged in the historical record. Where Git differs from a traditional versioning system, is that every commit can be thought of as a snap shot of your <em>entire</em> repository (Git is smart enough to not retake snapshots of files that haven&rsquo;t changed since the last commit). An amazing side-effect of this approach of just capturing snapshot&rsquo;s of changed files &amp; not really caring about what&rsquo;s actually changed in the files themselves - is it makes going to a different point in time in the history of your project nearly instantaneous.</p>
+
+<p>When you create a commit, it&rsquo;s given a 40 character alphanumeric name. It&rsquo;s possible to give commit&rsquo;s more than one name, something that you are going to remember. Couple popular names are &lsquo;master&rsquo;, &lsquo;staging&rsquo; etc. Example:</p>
+
+<pre><code> o-----o-----o-----o
+(C1)  (C2)  (C3)(master)
+</code></pre>
+
+<p>C1, C2 &hellip; master are a bunch of commits, each of whom have their regular name (a set of 40 alphanumeric characters) but also a human-rememberable name (C1, C2 etc.). If you want to <em>get</em> to a commit you do:</p>
+
+<pre><code>  git co &lt;name-of-commit&gt;
+</code></pre>
+
+<p>Here &ldquo;name-of-commit&rdquo; can be the 40-character SHA hash that Git has named the commit, or it could just be the human-rememberable name you gave it. Giving a commit a human rememberable name can be done by:</p>
+
+<pre><code>git co -b &lt;human-rememberable-name&gt; &lt;commit-name&gt;
+</code></pre>
+
+<p>Here &ldquo;commit-name&rdquo; can be either the SHA hash name Git gave the commit, or a human rememberable name you/someone else might&rsquo;ve given that commit (i.e it&rsquo;s possible and often the case, that commit&rsquo;s have more than one human rememberable name).</p>
+
+<p>Commits, besides having a name also have a link back to their parent. So, if you have a link to a commit you can walk all the way back way in history to the first commit in your repo. The &lsquo;~&rsquo; or the ^ operators give you access to a commit&rsquo;s parent. Example:</p>
+
+<pre><code>               (create-avatars)
+                   /
+o --- o --- o --- o
+       \
+         o --- o
+                \
+             (create-users)
+</code></pre>
+
+<p>Looking at this diagram, we can see that the commits that have been christened with human-rememberable names (create-avatars, create-users) share a common grand parent. So:</p>
+
+<pre><code>git log -1 create-avatars~2
+</code></pre>
+
+<p>Would be the same as:</p>
+
+<pre><code>git log -1 create-users~2
+</code></pre>
+
+<p>It&rsquo;s this property, of commits having parents, that leads to the illusion of branches in our code. Walking back from &ldquo;create-users&rdquo; to the first commit in our repo, we walk through a different sequence of commits than walking back from &ldquo;create-avatars&rdquo;. For those familiar, with the tree datastructure in computer science, this is kind of the same deal.</p>
+
+<h3>Bisect</h3>
+
+<h4>The problem</h4>
+
+<p>Now, that we&rsquo;ve got the basics out of the way, let&rsquo;s jump to the the &ldquo;git bisect&rdquo; command. Let&rsquo;s assume we have the following commit history:</p>
+
+<pre><code>  o --- o --- o --- o --- o --- o --- o --- o ..............o
+(C1)  (C2)  (C3)  (C4)  (C5)  (C6)  (C7)  (C8)            (C100)
+</code></pre>
+
+<p>Also assume, that the bug we are trying to track down is that when we were in C1 we had a file called &ldquo;happy_users.txt&rdquo; &amp; we were happy. We are now at C100, have made a bunch of changes all over the code and things are looking great. However, our &ldquo;happy_users.txt&rdquo; is no longer to be found &amp; we are not so happy. What&rsquo;s the fastest way to hunt down, where between C1 &amp; C100 did we accidentally delete the file?</p>
+
+<h4>Enter bisect</h4>
+
+<p>For those who have a rough idea of the way a binary search works, bisect is the same kind of deal. For those that don&rsquo;t, here&rsquo;s a rough overview &ndash; it jumps to the mid-point commit between where you said you had the happy_users.txt file (C1) and where you don&rsquo;t (C100). So in this case, it would be C50. It then prompts you, if all is good i.e. if you see the file there &ndash; if you do, then Git knows that you probably deleted the file between C51 - C100 and jumps to C75; if you didn&rsquo;t see the file in C50, Git knows that you deleted it between C1-C49 and jumps to C25 instead. As you can intuitively guess, this is <em>way</em> faster than going through all the commits from C1 through C100, to figure out which one was the bad one. For those more mathematically inclined, the big-Oh (O) performance is log (n), where the base is 2. To put some numbers on that, tracking down the bad commit in a series of <strong>100</strong> commits takes about <strong>7</strong> steps, in a <strong>1000</strong> about <strong>9</strong> &amp; in <strong>10,000</strong> about <strong>13</strong>!!</p>
+
+<p>Here&rsquo;s how bisect works. You do:</p>
+
+<pre><code>git bisect good &lt;good-commit-name&gt;
+</code></pre>
+
+<p>And then in each step Git is going to ask you, if the commit it just checked out is &ldquo;good&rdquo; or &ldquo;bad&rdquo;. To mark a commit that git has checked as being good or bad you would do:</p>
+
+<pre><code>git bisect good
+or
+git bisect bad
+</code></pre>
+
+<p>So, in our case we&rsquo;d mark a commit as being good or bad based on whether it has a happy_users.txt file (i.e. a &lsquo;find . -name happy_users.txt&rsquo;) in the repo.</p>
+
+<h4>I&rsquo;m freaking out &ndash; take me out of this bisect already!</h4>
+
+<p>No worries, just type the following &amp; git takes you back to where you were, before you started bisecting:</p>
+
+<pre><code>git bisect reset
+</code></pre>
+
+<h4>Where bisect breaks down</h4>
+
+<p>Git bisect operates under the assumption that the bug was regressed just once in the sequence of commits you are bisecting over, which is perfectly fine. It is kind of rare, to introduce a bug, fix it and re-introduce it again. To put some context around this, consider the following:</p>
+
+<pre><code>  o --- o --- o --- o --- o --- o ----- o ----- o
+(C1)  (C2)  (C3)  (C4)  (C5)  (C6)     (C7)    (C8)
+           (broke)           (fixed)  (broke)
+</code></pre>
+
+<p>Here C3 initially regressed a bug (i,e, it broke something) and then in C6 we inadvertently fixed it, while in C7 we broke it again. The bad news is, since Git does a binary search the commit it&rsquo;s going to tell you, that caused things to break would be C3.</p>
+
+<h4>How do you know bisect actually worked?</h4>
+
+<p>How do you protect yourself against this? At the end of every bisect, when Git tells you the bad commit &amp; you are back where you started (i.e. at C8 in this example), do a:</p>
+
+<pre><code>git revert &lt;bad-commit&gt;
+</code></pre>
+
+<p>So, assuming we did do a revert using the above example; we&rsquo;d have the following commit history:</p>
+
+<pre><code>  o --- o --- o --- o --- o --- o ----- o ----- o ------ o
+(C1)  (C2)  (C3)  (C4)  (C5)  (C6)     (C7)    (C8)    (C9)
+           (broke)           (fixed)  (broke)        (reverting the C3 commit)
+</code></pre>
+
+<p>Now, when we check to see if that worked &ndash; we&rsquo;ll still see things as having failed and you know that you probably re-introduced the commit later. To undo the the revert commit you just did, run:</p>
+
+<pre><code>git reset --hard C8
+</code></pre>
+
+<p>And you are back to where you started.</p>
+
+<h3>Summary</h3>
+
+<p>Git is an amazing tool &amp; I wish I had taken time to understand a little more the way it works before. It let&rsquo;s you do things, that an ordinary version system just can&rsquo;t (try doing a <a href="http://www.kernel.org/pub/software/scm/git/docs/git-rebase.html" title="Git rebase">rebase</a> in cvs or subversion). One of the best online resources for Git is up at kernel.org and can be found <a href="http://www.kernel.org/pub/software/scm/git/docs" title="Git docs">here</a>.</p>
+
+  </section>
+
+  <section class="comments">
+
+    <div id="disqus_thread"></div>
+    <script type='text/javascript' src='http://santosh-log.disqus.com/embed.js'></script>
+    <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    <a href="http://disqus.com" class="dsq-brlink">blog comments powered by <span class="logo-disqus">Disqus</span></a>
+
+
+  </section>
+</article>
+
+ 
+    </section>
+  
+  
+  
+  
+  
+  
+  </body>
+</html>
+

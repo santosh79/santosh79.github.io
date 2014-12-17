@@ -1,0 +1,97 @@
+<!doctype html>
+<html>
+  <head>
+    <link rel="stylesheet" type="text/css" href="/css/main.css">
+    <link rel="alternate" type="application/atom+xml" title="Custom events in NodeJS using prototypal OOP - feed" href="/index.xml" />
+
+    <script type="text/javascript">
+      if((navigator.userAgent.match(/iPad/i))) {
+        document.write("<meta name=\"viewport\" content=\"width=device-width; initial-scale=1.0; maximum-scale=1.0; user-scalable=0;\" />");
+      } else if((navigator.userAgent.match(/iPhone/i))) {
+        document.write("<meta name=\"viewport\" content=\"width=device-width; initial-scale=0.5; maximum-scale=1.0; user-scalable=1;\" />");
+      }
+    </script>
+
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/> 
+    <title>Custom events in NodeJS using prototypal OOP</title>
+  </head>
+  <body>
+    <header id="main_header">
+      <span>
+        <a href="/">blog</a>
+      </span>
+      <span>
+        <a href="http://santosh79.tumblr.com" target="_blank">tumblog</a>
+      </span>
+      <span>
+        <a href="http://github.com/santosh79/" target="_blank">github</a>
+      </span>
+      <span>
+        <a href="http://twitter.com/santosh79" target="_blank">@santosh79</a>
+      </span>
+      <span>
+        <a href="/images/resume.html">resume</a>
+      </span>
+    </header>
+    <section>
+      <article class="post">
+  <header>
+    <div class="date_article_page">February 7th 2012</div>
+    <h1>Custom events in NodeJS using prototypal OOP</h1>
+  </header>
+
+  <section class="content">
+    <p>I&rsquo;ve been playing around recently with NodeJS and have found the sheer performance to be insane. Apparently it <a href="http://venturebeat.com/2011/08/16/linkedin-node/">isn&rsquo;t just me</a> and a lot of other places have been able to significantly reduce their bloated infrastructures down by a lot by making the switch.</p>
+
+<p>Anyways, the point of this post is not to sell NodeJS, but rather to show how to use it&rsquo;s event&rsquo;s API. I confess, I&rsquo;m not a fan of the <strong>Pseudo Classical OOP</strong> pattern in Javascript. It just doesn&rsquo;t feel right, and prototypal OOP works and feels right. Basically, if you are doing something like:</p>
+
+<pre><code>var honda = new Car();
+</code></pre>
+
+<p>You are doing the pseudo classical way. If you are doing something like:</p>
+
+<pre><code>var honda = car.create();
+</code></pre>
+
+<p>You are doing prototypal inheritance and you rock!</p>
+
+<p>That said, trying to figure out how in the hell do I emit events in NodeJS sent me on a crazy wild goose chase, <a href="http://stackoverflow.com/questions/6892428/node-js-best-method-for-emitting-events-from-modules">look at this Stack Overflow article</a>, since they all were requiring the use of the hated <strong>new</strong> keyword. Instead, just do the following:</p>
+
+<pre><code>var events = require('events');
+var objectWithEvents = Object.create(new events.EventEmitter);
+</code></pre>
+
+<p>And then you can do:</p>
+
+<pre><code>objectWithEvents.on("yay", function(){
+  console.log("Feign enthusiasm!");
+});
+objectWithEvents.emit("yay");
+</code></pre>
+
+<p>Hope this helps and yea stick with Prototypal Inheritance in JS. It&rsquo;s much simpler.</p>
+
+  </section>
+
+  <section class="comments">
+
+    <div id="disqus_thread"></div>
+    <script type='text/javascript' src='http://santosh-log.disqus.com/embed.js'></script>
+    <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    <a href="http://disqus.com" class="dsq-brlink">blog comments powered by <span class="logo-disqus">Disqus</span></a>
+
+
+  </section>
+</article>
+
+ 
+    </section>
+  
+  
+  
+  
+  
+  
+  </body>
+</html>
+

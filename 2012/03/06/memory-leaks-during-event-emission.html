@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+  <head>
+    <link rel="stylesheet" type="text/css" href="/css/main.css">
+    <link rel="alternate" type="application/atom+xml" title="Memory leaks during Event emission - feed" href="/index.xml" />
+
+    <script type="text/javascript">
+      if((navigator.userAgent.match(/iPad/i))) {
+        document.write("<meta name=\"viewport\" content=\"width=device-width; initial-scale=1.0; maximum-scale=1.0; user-scalable=0;\" />");
+      } else if((navigator.userAgent.match(/iPhone/i))) {
+        document.write("<meta name=\"viewport\" content=\"width=device-width; initial-scale=0.5; maximum-scale=1.0; user-scalable=1;\" />");
+      }
+    </script>
+
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/> 
+    <title>Memory leaks during Event emission</title>
+  </head>
+  <body>
+    <header id="main_header">
+      <span>
+        <a href="/">blog</a>
+      </span>
+      <span>
+        <a href="http://santosh79.tumblr.com" target="_blank">tumblog</a>
+      </span>
+      <span>
+        <a href="http://github.com/santosh79/" target="_blank">github</a>
+      </span>
+      <span>
+        <a href="http://twitter.com/santosh79" target="_blank">@santosh79</a>
+      </span>
+      <span>
+        <a href="/images/resume.html">resume</a>
+      </span>
+    </header>
+    <section>
+      <article class="post">
+  <header>
+    <div class="date_article_page">March 6th 2012</div>
+    <h1>Memory leaks during Event emission</h1>
+  </header>
+
+  <section class="content">
+    <p>Javascript has garbage collection, so there&rsquo;s no way we can leak memory right? Wrong. Memory leaks are pretty easy to create in Javascript much like in any other language that has <em>garbage collection</em>. The problem isn&rsquo;t that bad when running Javascript on the client - unless you are having a blatantly obvious memory leak that kills your browser everytime the page loads. Writing Javascript on the server on the other hand, means you really have to focus on making sure you are not leaking any memory since your server process is going to be pretty long running.</p>
+
+<h3>Creating the leak</h3>
+
+<p>Here&rsquo;s a little javascript snippet:</p>
+
+<pre><code>var events = require('events');
+var emitter = Object.create(events.EventEmitter.prototype);
+
+var i = 0;
+(function createObject() {
+    var temp_func = function() { console.log('hi'); };
+    emitter.on('some_event', temp_func);
+    if(++i &lt; 10) {
+        process.nextTick(createObject);
+    }
+}());
+</code></pre>
+
+<p>Now, when you run this it should be just fine, but believe me it leaks memory. The line with the leak is:</p>
+
+<pre><code>emitter.on('some_event', temp_func);
+</code></pre>
+
+<p>Basically, this line grabs the function object <em>temp_func</em> and pushes it onto an array stored somewhere deep in the bowels of the emitter object. What this means, is that the <em>temp_func</em> object is never going to be garbage collected unless the <em>emitter</em> object is and is the only one having a reference to it. Now you might think, temp_func is a pretty small function but remember, it&rsquo;s also storing a closure to <em>every</em> var declared in <em>every function</em> it&rsquo;s nested in. This is fine, if that&rsquo;s what you want. Often times though, you find your object&rsquo;s have a <em>lifespan</em> after which they really needn&rsquo;t be subscribed to events. In which case, you&rsquo;ll find your unneeded objects still hanging around eating memory. If you know when to unsubscribe from listening to an event, it&rsquo;s as simple as:</p>
+
+<pre><code>emitter.removeListener('some_event', temp_func);
+</code></pre>
+
+<h3>TL;DR</h3>
+
+<p>Anytime you find yourself subscribing to events, try figuring out when to unsubscribe at that same time. Remember, <strong>removeListener</strong> is your friend.</p>
+
+  </section>
+
+  <section class="comments">
+
+    <div id="disqus_thread"></div>
+    <script type='text/javascript' src='http://santosh-log.disqus.com/embed.js'></script>
+    <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    <a href="http://disqus.com" class="dsq-brlink">blog comments powered by <span class="logo-disqus">Disqus</span></a>
+
+
+  </section>
+</article>
+
+ 
+    </section>
+  
+  
+  
+  
+  
+  
+  </body>
+</html>
+
