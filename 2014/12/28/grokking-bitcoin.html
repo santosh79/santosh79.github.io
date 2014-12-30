@@ -1,0 +1,198 @@
+<!doctype html>
+<html>
+  <head>
+    <link rel="stylesheet" type="text/css" href="/css/main.css">
+    <link rel="alternate" type="application/atom+xml" title="Grokking Bitcoin - feed" href="/index.xml" />
+
+    <script type="text/javascript">
+      if((navigator.userAgent.match(/iPad/i))) {
+        document.write("<meta name=\"viewport\" content=\"width=device-width; initial-scale=1.0; maximum-scale=1.0; user-scalable=0;\" />");
+      } else if((navigator.userAgent.match(/iPhone/i))) {
+        document.write("<meta name=\"viewport\" content=\"width=device-width; initial-scale=0.5; maximum-scale=1.0; user-scalable=1;\" />");
+      }
+    </script>
+
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/> 
+    <title>Grokking Bitcoin</title>
+  </head>
+  <body>
+    <header id="main_header">
+      <span>
+        <a href="/">blog</a>
+      </span>
+      <span>
+        <a href="http://santosh79.tumblr.com" target="_blank">tumblog</a>
+      </span>
+      <span>
+        <a href="http://github.com/santosh79/" target="_blank">github</a>
+      </span>
+      <span>
+        <a href="http://twitter.com/santosh79" target="_blank">@santosh79</a>
+      </span>
+      <span>
+        <a href="/images/resume.html">resume</a>
+      </span>
+    </header>
+    <section>
+      <article class="post">
+  <header>
+    <div class="date_article_page">December 28th 2014</div>
+    <h1>Grokking Bitcoin</h1>
+  </header>
+
+  <section class="content">
+    <p>Ok, I think distributed, de-centralized, consensus building algorithms are, for lack of a better phrase <strong>da bomb</strong>. Kinda like <a href="http://en.wikipedia.org/wiki/Borg_%28Star_Trek%29">the Borg</a>, for all the trekkies out there. This area, didn&rsquo;t really interest me much until <a href="https://bitcoin.org">Bitcoin</a> came along. I think Bitcoin flips so many things on their head that it just blew my mind that <em>this actually works</em>.</p>
+
+<p>Here are just a couple of ways (to name just a few), in which Bitcoin hands traditional banking, it&rsquo;s ass, so to speak:</p>
+
+<ul>
+<li><p>No central authority - There is no central bank, running a ledger to keep track of who has how much in what account. So, right off the bat, this means, this shit is <strong>fault tolerant</strong> as hell, since there is no single point of failure.</p></li>
+<li><p>Public ledger - All of the transactions that take place are broadcasted publicly. Think about that for a second. Imagine, you make a payment for a phone bill and this gets broadcasted to <strong>everybody</strong>. What kind of a privacy nightmare would that be? How does Bitcoin do this and still get away with it?</p></li>
+<li><p>Incentivizing honesty - Obviously, given that it&rsquo;s a software system and that too one transacting real $$, any dummy would know that there is a really strong incentive to hack this and rob other peoples Bitcoins. How does Bitcoin work around this? Interestingly, they don&rsquo;t try to make the system unbreakable as hell (there is no such thing in software). Rather, they make it <em>economically unviable</em> to hack the system, i.e. it turns out you would stand to gain more Bitcoins by using your resources (both $$ and cpu cycles) in doing honest work of mining bitcoins as opposed to trying to hack the block-chain.</p></li>
+</ul>
+
+
+<p>So how does this actually work? I&rsquo;m a programmer, not a financial planner, so I&rsquo;m going to dive right into the nuts and bolts of Bitcoin&rsquo;s internal datastructures.</p>
+
+<h3>The Bitcoin</h3>
+
+<p>So, how does a Bitcoin actually look? For those who haven&rsquo;t seen a digital currency before (and they were quite a few before Bitcoin) here goes:</p>
+
+<pre><code>                  +-----------------+         +-----------------+         +-----------------+
+                  | +-------------+ |         | +-------------+ |         | +-------------+ |
+                  | | Owner 1's   | |         | | Owner 2's   | |         | | Owner 3's   | |
+                  | | verification| |         | | verification| |         | | verification| |
+                  | | key         | |         | | key         | |         | | key         | |
+                  | +-------------+ |         | +-------------+ |         | +-------------+ |
+Previous          |        |        |         |        |        |         |        |        |
+  Owners     -----------   |        |---------------   |        |---------------   |        |
+                  |     |  |        |         |     |  |        |         |     |  |        |
+                  |    +----+       |         |    +----+       |         |    +----+       |
+                  |    |Hash|       |         |    |Hash|       |         |    |Hash|       |
+                  |    +----+       |         |    +----+       |         |    +----+       |
+                  |      |          |         |      |          |         |      |          |
+                  | +----------+    |         | +----------+    |         | +----------+    |
+                  | | Owner 0's|    |         | | Owner 1's|    |         | | Owner 2's|    |
+                  | | signature|    |         | | signature|    |         | | signature|    |
+                  | +----------+    |         | +----------+    |         | +----------+    |
+                  +-----------------+         +-----------------+         +-----------------+
+</code></pre>
+
+<p>This is it! Basically a linked list of stuff called Transactions. Again, a Bitcoin == a Linked List (of Transactions). Who is the owner of this linked list (Bitcoin)? The gal who is at the tail of it &ndash; i.e. the gal whose <a href="http://en.wikipedia.org/wiki/Public-key_cryptography">Verification Key (Public Key)</a> is Owner 3.</p>
+
+<h3>Changing owners</h3>
+
+<p>Let&rsquo;s say Owner 3 would like to now transfer over the Bitcoin to Owner 4. How does this work? Owner 3 would do the following:</p>
+
+<ul>
+<li>Step 1 Grab the new Owner&rsquo;s verification key.</li>
+<li>Step 2 Make a Hash (using a <a href="">pre-determined cryptographic hash function</a>) of the current last transaction in the Linked List, and the new Owner&rsquo;s verification key.</li>
+<li>Step 3 Digitally sign it.</li>
+<li>Step 4 Compact the stuff in steps 1-3 into a new Transaction.</li>
+<li>Step 5 Add this new Transaction to the end of the Linked List.</li>
+<li>Step 6 Broadcast this new Transaction to the other nodes.</li>
+</ul>
+
+
+<p>So, basically at the end of doing step 1-6 the Linked List would look like this:</p>
+
+<pre><code>                    +-----------------+         +-----------------+         +-----------------+
+                    | +-------------+ |         | +-------------+ |         | +-------------+ |
+                    | | Owner 2's   | |         | | Owner 3's   | |         | | Owner 4's   | |
+                    | | verification| |         | | verification| |         | | verification| |
+                    | | key         | |         | | key         | |         | | key         | |
+                    | +-------------+ |         | +-------------+ |         | +-------------+ |
+Previous            |        |        |         |        |        |         |        |        |
+  Owners   ---------------   |        |---------------   |        |---------------   |        |
+                    |     |  |        |         |     |  |        |         |     |  |        |
+                    |    +----+       |         |    +----+       |         |    +----+       |
+                    |    |Hash|       |         |    |Hash|       |         |    |Hash|       |
+                    |    +----+       |         |    +----+       |         |    +----+       |
+                    |      |          |         |      |          |         |      |          |
+                    | +----------+    |         | +----------+    |         | +----------+    |
+                    | | Owner 1's|    |         | | Owner 2's|    |         | | Owner 3's|    |
+                    | | signature|    |         | | signature|    |         | | signature|    |
+                    | +----------+    |         | +----------+    |         | +----------+    |
+                    +-----------------+         +-----------------+         +-----------------+
+</code></pre>
+
+<p>And that&rsquo;s it! How would someone verify that the Bitcoin now belongs to Owner 4? Easy, all they would need is to verify that Owner 3 (the previous owner) did infact really sign it. For this, they&rsquo;ll just need Owner 3&rsquo;s public key and verify that the signature in the last transaction in the Linked List was infact signed by Bitcoin and that the new owner of the coin is Owner 4.</p>
+
+<h3>Overcoming the double-spend</h3>
+
+<p>The <a href="http://en.wikipedia.org/wiki/Double-spending">double spending problem</a> is a notoriously hard nut to crack, without a central authority. Here&rsquo;s the crux of it:</p>
+
+<ul>
+<li>As in the previous section, let&rsquo;s say Owner 3 transfers ownership to Owner 4 and broadcasts it.</li>
+<li>Let&rsquo;s say owner 3 is a little fraudulent and also tries to re-use the same Bitcoin and transfer ownership to another owner, let&rsquo;s say Owner 5.</li>
+</ul>
+
+
+<p>How is this prevented? Bitcoin uses a combination of two concepts:</p>
+
+<ol>
+<li>Mining - This is basically compacting open/unresolved transactions into something called a Transaction Block and adding each Transaction Block to a global Ledger called the Transaction Block Chain.</li>
+<li>Proof-of-work Protocols - These can be thought of as puzzles kinda like Sudoku. That are hard to solve and very easy to verify.</li>
+</ol>
+
+
+<h3>Proof-of-work Protocols</h3>
+
+<p>They are something like this:</p>
+
+<pre><code>                           +--------+           +--------+
+                           |string A|           |string B|
+                           +--------+           +--------+
+                              |                    |
+                              |                    |
+                              |    +-------+       |
+                              \--- |SHA-256|-------/
+                                   +-------+
+                                      |
+                                      |
+                                      |
+                                   +-------+
+                                   |Digest |
+                                   +-------+
+</code></pre>
+
+<p>Given string A, find string B such that the SHA-256 digest of their concatenation yields a <em>certain number</em> of leading 0&rsquo;s in this SHA-256 digest. This <em>certain number</em> can be tweaked. If we make it more, the complexity goes up geometrically. That means, finding string B such that the SHA-256 digest has 2 leading 0&rsquo;s, is twice as hard as finding a digest with just one leading 0. So, if the network finds that the mining process is a little too easy (judging by the time taken), it bumps up the leading 0&rsquo;s requirement. And what really makes this work is that the SHA-256 cryptographic hash function, like MD5 and other cryptographic hash functions has the following properties:</p>
+
+<ul>
+<li>Digest&rsquo;s appear to bear no relation to their inputs</li>
+<li>Digest&rsquo;s appear random</li>
+</ul>
+
+
+<h3>Incentivizing Honesty</h3>
+
+<p>The mathematical model in the paper does a pretty good job of mathematically modelling the system using a <a href="http://en.wikipedia.org/wiki/Poisson_distribution">Poisson distribution</a> and calculating the effort required to fork the Transaction Block Chain and make that globally accepted. In today&rsquo;s that works out to about $400 million per ten minutes. And that is only going to work for 10 minutes. For someone to do that and get away with it, they&rsquo;d have to keep spending 400 million dollars till the end of the currency!</p>
+
+<h3>TL;DR</h3>
+
+<p><a href="https://bitcoin.org/bitcoin.pdf">The Bitcoin Paper</a>.</p>
+
+  </section>
+
+  <section class="comments">
+
+    <div id="disqus_thread"></div>
+    <script type='text/javascript' src='http://santosh-log.disqus.com/embed.js'></script>
+    <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    <a href="http://disqus.com" class="dsq-brlink">blog comments powered by <span class="logo-disqus">Disqus</span></a>
+
+
+  </section>
+</article>
+
+ 
+    </section>
+  
+  
+  
+  
+  
+  
+  </body>
+</html>
+
