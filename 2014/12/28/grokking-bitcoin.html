@@ -96,24 +96,24 @@ Previous          |        |        |         |        |        |         |     
 
 <p>So, basically at the end of doing step 1-6 the Linked List would look like this:</p>
 
-<pre><code>                    +-----------------+         +-----------------+         +-----------------+
-                    | +-------------+ |         | +-------------+ |         | +-------------+ |
-                    | | Owner 2's   | |         | | Owner 3's   | |         | | Owner 4's   | |
-                    | | verification| |         | | verification| |         | | verification| |
-                    | | key         | |         | | key         | |         | | key         | |
-                    | +-------------+ |         | +-------------+ |         | +-------------+ |
-Previous            |        |        |         |        |        |         |        |        |
-  Owners   ---------------   |        |---------------   |        |---------------   |        |
-                    |     |  |        |         |     |  |        |         |     |  |        |
-                    |    +----+       |         |    +----+       |         |    +----+       |
-                    |    |Hash|       |         |    |Hash|       |         |    |Hash|       |
-                    |    +----+       |         |    +----+       |         |    +----+       |
-                    |      |          |         |      |          |         |      |          |
-                    | +----------+    |         | +----------+    |         | +----------+    |
-                    | | Owner 1's|    |         | | Owner 2's|    |         | | Owner 3's|    |
-                    | | signature|    |         | | signature|    |         | | signature|    |
-                    | +----------+    |         | +----------+    |         | +----------+    |
-                    +-----------------+         +-----------------+         +-----------------+
+<pre><code>                  +-----------------+         +-----------------+         +-----------------+
+                  | +-------------+ |         | +-------------+ |         | +-------------+ |
+                  | | Owner 2's   | |         | | Owner 3's   | |         | | Owner 4's   | |
+                  | | verification| |         | | verification| |         | | verification| |
+                  | | key         | |         | | key         | |         | | key         | |
+                  | +-------------+ |         | +-------------+ |         | +-------------+ |
+Previous          |        |        |         |        |        |         |        |        |
+  Owners     -----------   |        |---------------   |        |---------------   |        |
+                  |     |  |        |         |     |  |        |         |     |  |        |
+                  |    +----+       |         |    +----+       |         |    +----+       |
+                  |    |Hash|       |         |    |Hash|       |         |    |Hash|       |
+                  |    +----+       |         |    +----+       |         |    +----+       |
+                  |      |          |         |      |          |         |      |          |
+                  | +----------+    |         | +----------+    |         | +----------+    |
+                  | | Owner 1's|    |         | | Owner 2's|    |         | | Owner 3's|    |
+                  | | signature|    |         | | signature|    |         | | signature|    |
+                  | +----------+    |         | +----------+    |         | +----------+    |
+                  +-----------------+         +-----------------+         +-----------------+
 </code></pre>
 
 <p>And that&rsquo;s it! How would someone verify that the Bitcoin now belongs to Owner 4? Easy, all they would need is to verify that Owner 3 (the previous owner) did infact really sign it. For this, they&rsquo;ll just need Owner 3&rsquo;s public key and verify that the signature in the last transaction in the Linked List was infact signed by Bitcoin and that the new owner of the coin is Owner 4.</p>
